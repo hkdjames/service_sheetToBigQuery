@@ -41,13 +41,23 @@ def send_slack_notification(message):
 
 def get_credentials():
     """Get Google Cloud credentials based on platform."""
+    # Define the required scopes for Google Sheets and BigQuery access
+    SCOPES = [
+        'https://www.googleapis.com/auth/spreadsheets.readonly',  # Google Sheets read access
+        'https://www.googleapis.com/auth/cloud-platform',        # BigQuery and other GCP services
+        'https://www.googleapis.com/auth/drive.readonly'         # Google Drive read access (for accessing sheets)
+    ]
+    
     try:
         if platform.system() == 'Windows':
             # Windows - use service account file (for local development)
             service_account_path = r'G:\Shared drives\HKD - Admin\GitHub\process_agenda\hkd-reporting-5b9e2c294edc.json'
             if os.path.exists(service_account_path):
                 logger.info(f"Using Windows service account file: {service_account_path}")
-                return service_account.Credentials.from_service_account_file(service_account_path)
+                credentials = service_account.Credentials.from_service_account_file(
+                    service_account_path, scopes=SCOPES
+                )
+                return credentials
             else:
                 logger.error(f"Service account file not found: {service_account_path}")
                 raise FileNotFoundError(f"Service account file not found: {service_account_path}")
@@ -65,7 +75,12 @@ def get_credentials():
             try:
                 credentials_dict = json.loads(credentials_json)
                 logger.info("Successfully parsed credentials JSON")
-                return service_account.Credentials.from_service_account_info(credentials_dict)
+                logger.info(f"Service account project ID: {credentials_dict.get('project_id', 'Unknown')}")
+                logger.info(f"Service account email: {credentials_dict.get('client_email', 'Unknown')}")
+                credentials = service_account.Credentials.from_service_account_info(
+                    credentials_dict, scopes=SCOPES
+                )
+                return credentials
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse credentials JSON: {e}")
                 raise ValueError(f"Invalid JSON in google_cloud_hkdreporting: {e}")
@@ -150,7 +165,21 @@ def get_sheet_data(sheet_url, tab_name=None):
         return values
         
     except HttpError as e:
-        error_msg = f"Google Sheets API error: {e}"
+        error_code = e.resp.status
+        error_reason = e.error_details[0].get('reason', 'Unknown') if e.error_details else 'Unknown'
+        
+        if error_code == 403:
+            if 'SERVICE_DISABLED' in str(e):
+                error_msg = f"Google Sheets API is disabled for the project. Enable it at: https://console.developers.google.com/apis/api/sheets.googleapis.com/overview"
+            elif 'does not have permission' in str(e):
+                error_msg = f"Service account does not have permission to access this Google Sheet. Please share the sheet with the service account email or check IAM permissions."
+            else:
+                error_msg = f"Permission denied accessing Google Sheet: {e}"
+        elif error_code == 404:
+            error_msg = f"Google Sheet not found. Please check the URL: {sheet_url}"
+        else:
+            error_msg = f"Google Sheets API error (HTTP {error_code}): {e}"
+        
         logger.error(error_msg)
         send_slack_notification(f"🔴 Sheet to BigQuery Service: {error_msg}")
         raise
