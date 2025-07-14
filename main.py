@@ -48,6 +48,15 @@ def get_credentials():
         'https://www.googleapis.com/auth/drive.readonly'         # Google Drive read access (for accessing sheets)
     ]
     
+    # Check for environment variables that might affect project context
+    google_cloud_project = os.environ.get('GOOGLE_CLOUD_PROJECT')
+    gcloud_project = os.environ.get('GCLOUD_PROJECT')
+    project_id = os.environ.get('PROJECT_ID')
+    
+    logger.info(f"Environment check - GOOGLE_CLOUD_PROJECT: {google_cloud_project}")
+    logger.info(f"Environment check - GCLOUD_PROJECT: {gcloud_project}")
+    logger.info(f"Environment check - PROJECT_ID: {project_id}")
+    
     try:
         if platform.system() == 'Windows':
             # Windows - use service account file (for local development)
@@ -57,6 +66,7 @@ def get_credentials():
                 credentials = service_account.Credentials.from_service_account_file(
                     service_account_path, scopes=SCOPES
                 )
+                logger.info(f"Windows credentials project: {credentials.project_id}")
                 return credentials
             else:
                 logger.error(f"Service account file not found: {service_account_path}")
@@ -72,15 +82,33 @@ def get_credentials():
             
             logger.info(f"Found google_cloud_hkdreporting environment variable, length: {len(credentials_json)}")
             
+            # Log first 100 characters (non-sensitive part) to help debug
+            logger.info(f"Environment variable start: {credentials_json[:100]}...")
+            
             try:
                 credentials_dict = json.loads(credentials_json)
                 logger.info("Successfully parsed credentials JSON")
                 logger.info(f"Service account project ID: {credentials_dict.get('project_id', 'Unknown')}")
                 logger.info(f"Service account email: {credentials_dict.get('client_email', 'Unknown')}")
+                
                 credentials = service_account.Credentials.from_service_account_info(
                     credentials_dict, scopes=SCOPES
                 )
+                
+                # Log the final credentials project
+                logger.info(f"Final credentials project: {credentials.project_id}")
+                
+                # If the project doesn't match decoded-jigsaw-341521, create with explicit project
+                if credentials.project_id != 'decoded-jigsaw-341521':
+                    logger.warning(f"Service account project ({credentials.project_id}) doesn't match expected project (decoded-jigsaw-341521)")
+                    logger.info("Creating credentials with explicit project override...")
+                    
+                    # Create credentials with explicit project
+                    credentials = credentials.with_project('decoded-jigsaw-341521')
+                    logger.info(f"Overridden credentials project: {credentials.project_id}")
+                
                 return credentials
+                
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse credentials JSON: {e}")
                 raise ValueError(f"Invalid JSON in google_cloud_hkdreporting: {e}")
@@ -111,13 +139,25 @@ def get_sheet_data(sheet_url, tab_name=None):
     """Get data from Google Sheet"""
     try:
         creds = get_credentials()
+        logger.info(f"Using credentials for project: {creds.project_id if hasattr(creds, 'project_id') else 'Unknown'}")
+        
+        # Set quota project to ensure API calls use the correct project
+        if hasattr(creds, 'with_quota_project'):
+            creds = creds.with_quota_project('decoded-jigsaw-341521')
+            logger.info("Set quota project to decoded-jigsaw-341521")
+        
+        # Build the service with explicit project configuration
         service = build('sheets', 'v4', credentials=creds)
+        
+        # Log the service configuration
+        logger.info(f"Created Google Sheets service with credentials")
         
         # Extract sheet ID from URL
         sheet_id = extract_sheet_id_from_url(sheet_url)
         logger.info(f"Extracted sheet ID: {sheet_id}")
         
         # Get sheet metadata to find available tabs
+        logger.info("Requesting sheet metadata...")
         sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
         sheets = sheet_metadata.get('sheets', [])
         
@@ -149,6 +189,7 @@ def get_sheet_data(sheet_url, tab_name=None):
             logger.info(f"Using first available tab: {range_name}")
         
         # Get the data
+        logger.info(f"Requesting data from range: {range_name}")
         result = service.spreadsheets().values().get(
             spreadsheetId=sheet_id,
             range=range_name
