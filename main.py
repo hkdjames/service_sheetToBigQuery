@@ -98,14 +98,9 @@ def get_credentials():
                 # Log the final credentials project
                 logger.info(f"Final credentials project: {credentials.project_id}")
                 
-                # If the project doesn't match decoded-jigsaw-341521, create with explicit project
-                if credentials.project_id != 'decoded-jigsaw-341521':
-                    logger.warning(f"Service account project ({credentials.project_id}) doesn't match expected project (decoded-jigsaw-341521)")
-                    logger.info("Creating credentials with explicit project override...")
-                    
-                    # Create credentials with explicit project
-                    credentials = credentials.with_project('decoded-jigsaw-341521')
-                    logger.info(f"Overridden credentials project: {credentials.project_id}")
+                # The service account is from hkd-reporting project, which is correct
+                # We'll use the appropriate project when creating BigQuery clients
+                logger.info(f"Using service account from project: {credentials.project_id}")
                 
                 return credentials
                 
@@ -141,10 +136,11 @@ def get_sheet_data(sheet_url, tab_name=None):
         creds = get_credentials()
         logger.info(f"Using credentials for project: {creds.project_id if hasattr(creds, 'project_id') else 'Unknown'}")
         
-        # Set quota project to ensure API calls use the correct project
+        # Set quota project for API billing (use the deployment project)
+        deployment_project = 'decoded-jigsaw-341521'
         if hasattr(creds, 'with_quota_project'):
-            creds = creds.with_quota_project('decoded-jigsaw-341521')
-            logger.info("Set quota project to decoded-jigsaw-341521")
+            creds = creds.with_quota_project(deployment_project)
+            logger.info(f"Set quota project to {deployment_project} for API billing")
         
         # Build the service with explicit project configuration
         service = build('sheets', 'v4', credentials=creds)
@@ -279,9 +275,18 @@ def main(config_id=None, name=None, google_sheet_url=None, google_sheet_tab_name
         df = pd.DataFrame(sheet_data[1:], columns=sheet_data[0])  # First row as headers
         logger.info(f"Created DataFrame with {len(df)} rows and {len(df.columns)} columns")
         
-        # Get BigQuery client
+        # Get BigQuery client with explicit project
         creds = get_credentials()
+        
+        # Set quota project for API billing (use the deployment project for billing)
+        deployment_project = 'decoded-jigsaw-341521'
+        if hasattr(creds, 'with_quota_project'):
+            creds = creds.with_quota_project(deployment_project)
+            logger.info(f"Set quota project to {deployment_project} for API billing")
+        
+        # Create BigQuery client targeting the specified project
         client = bigquery.Client(credentials=creds, project=google_cloud_project_id)
+        logger.info(f"Created BigQuery client for project: {google_cloud_project_id}")
         
         # Create dataset if it doesn't exist
         create_bigquery_dataset_if_not_exists(client, google_cloud_project_id, bigquery_dataset_id)
@@ -331,7 +336,7 @@ if __name__ == "__main__":
     main(
         name="test_config",
         google_sheet_url="https://docs.google.com/spreadsheets/d/1example",
-        google_cloud_project_id="decoded-jigsaw-341521",
+        google_cloud_project_id="hkd-reporting",  # Use correct project for BigQuery
         bigquery_dataset_id="test_dataset",
         bigquery_table_id="test_table",
         schema_handling="auto_detect"
