@@ -96,11 +96,7 @@ def get_credentials():
                 )
                 
                 # Log the final credentials project
-                logger.info(f"Final credentials project: {credentials.project_id}")
-                
-                # The service account is from hkd-reporting project, which is correct
-                # We'll use the appropriate project when creating BigQuery clients
-                logger.info(f"Using service account from project: {credentials.project_id}")
+                logger.info(f"Service account project: {credentials.project_id}")
                 
                 return credentials
                 
@@ -136,13 +132,7 @@ def get_sheet_data(sheet_url, tab_name=None):
         creds = get_credentials()
         logger.info(f"Using credentials for project: {creds.project_id if hasattr(creds, 'project_id') else 'Unknown'}")
         
-        # Set quota project for API billing (use the deployment project)
-        deployment_project = 'decoded-jigsaw-341521'
-        if hasattr(creds, 'with_quota_project'):
-            creds = creds.with_quota_project(deployment_project)
-            logger.info(f"Set quota project to {deployment_project} for API billing")
-        
-        # Build the service with explicit project configuration
+        # Build the Google Sheets service
         service = build('sheets', 'v4', credentials=creds)
         
         # Log the service configuration
@@ -275,16 +265,8 @@ def main(config_id=None, name=None, google_sheet_url=None, google_sheet_tab_name
         df = pd.DataFrame(sheet_data[1:], columns=sheet_data[0])  # First row as headers
         logger.info(f"Created DataFrame with {len(df)} rows and {len(df.columns)} columns")
         
-        # Get BigQuery client with explicit project
+        # Get BigQuery client
         creds = get_credentials()
-        
-        # Set quota project for API billing (use the deployment project for billing)
-        deployment_project = 'decoded-jigsaw-341521'
-        if hasattr(creds, 'with_quota_project'):
-            creds = creds.with_quota_project(deployment_project)
-            logger.info(f"Set quota project to {deployment_project} for API billing")
-        
-        # Create BigQuery client targeting the specified project
         client = bigquery.Client(credentials=creds, project=google_cloud_project_id)
         logger.info(f"Created BigQuery client for project: {google_cloud_project_id}")
         

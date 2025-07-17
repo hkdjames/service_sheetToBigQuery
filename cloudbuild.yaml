@@ -6,13 +6,13 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'build', '-t',
-      'us-central1-docker.pkg.dev/decoded-jigsaw-341521/github-service-sheettobigquery/service-sheettobigquery:latest',
+      'us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/service-sheettobigquery:latest',
       '.'
     ]
 
   # Step 2: Push the latest tag to the Google Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-central1-docker.pkg.dev/decoded-jigsaw-341521/github-service-sheettobigquery/service-sheettobigquery:latest']
+    args: ['push', 'us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/service-sheettobigquery:latest']
 
   # Step 3: Deploy the latest tag to Google Cloud Run
   - name: 'gcr.io/cloud-builders/gcloud'
@@ -22,7 +22,7 @@ steps:
       - |
         # Deploy to Cloud Run with secrets linked as environment variables
         gcloud run deploy service-sheettobigquery \
-          --image us-central1-docker.pkg.dev/decoded-jigsaw-341521/github-service-sheettobigquery/service-sheettobigquery:latest \
+          --image us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/service-sheettobigquery:latest \
           --region us-central1 \
           --platform managed \
           --allow-unauthenticated \
@@ -34,4 +34,4 @@ steps:
           --set-secrets google_cloud_hkdreporting=google_cloud_hkdreporting:latest,slack_accessToken=slack_accessToken:latest
 
 images:
-  - 'us-central1-docker.pkg.dev/decoded-jigsaw-341521/github-service-sheettobigquery/service-sheettobigquery:latest' 
+  - 'us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/service-sheettobigquery:latest' 
