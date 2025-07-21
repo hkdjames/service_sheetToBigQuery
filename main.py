@@ -3,6 +3,7 @@ import os
 import platform
 import logging
 import pandas as pd
+import sys
 from google.oauth2 import service_account
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
@@ -12,12 +13,14 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 # Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
 
 # Configure Slack Client
 slack_access_token = os.getenv("slack_accessToken")
@@ -245,12 +248,62 @@ def create_custom_schema(custom_schema_json):
         logger.error(f"Error creating custom schema: {e}")
         raise ValueError(f"Invalid custom schema format: {e}")
 
+def get_config_from_env():
+    """Load configuration from environment variables"""
+    config = {
+        'config_id': os.getenv('CONFIG_ID'),
+        'name': os.getenv('CONFIG_NAME'),
+        'google_sheet_url': os.getenv('GOOGLE_SHEET_URL'),
+        'google_sheet_tab_name': os.getenv('GOOGLE_SHEET_TAB_NAME'),
+        'google_cloud_project_id': os.getenv('GOOGLE_CLOUD_PROJECT_ID'),
+        'bigquery_dataset_id': os.getenv('BIGQUERY_DATASET_ID'),
+        'bigquery_table_id': os.getenv('BIGQUERY_TABLE_ID'),
+        'schema_handling': os.getenv('SCHEMA_HANDLING', 'auto_detect'),
+        'custom_schema': os.getenv('CUSTOM_SCHEMA')
+    }
+    
+    # Validate required parameters
+    required_params = ['name', 'google_sheet_url', 'google_cloud_project_id', 'bigquery_dataset_id', 'bigquery_table_id']
+    missing_params = []
+    
+    for param in required_params:
+        if not config.get(param):
+            missing_params.append(param)
+    
+    if missing_params:
+        error_msg = f"Missing required environment variables: {', '.join(missing_params)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    logger.info(f"Loaded configuration for: {config['name']}")
+    return config
+
 def main(config_id=None, name=None, google_sheet_url=None, google_sheet_tab_name=None, 
          google_cloud_project_id=None, bigquery_dataset_id=None, bigquery_table_id=None,
          schema_handling=None, custom_schema=None):
-    """Main function to transfer data from Google Sheet to BigQuery"""
+    """Main function to transfer data from Google Sheet to BigQuery
+    
+    If no parameters are provided, configuration will be read from environment variables.
+    This allows the function to work both as a job and as a service.
+    """
     
     try:
+        # Determine if we're in job mode (no parameters provided)
+        job_mode = not name
+        
+        # If no parameters provided, read from environment variables (job mode)
+        if job_mode:
+            config = get_config_from_env()
+            config_id = config['config_id']
+            name = config['name']
+            google_sheet_url = config['google_sheet_url']
+            google_sheet_tab_name = config['google_sheet_tab_name']
+            google_cloud_project_id = config['google_cloud_project_id']
+            bigquery_dataset_id = config['bigquery_dataset_id']
+            bigquery_table_id = config['bigquery_table_id']
+            schema_handling = config['schema_handling']
+            custom_schema = config['custom_schema']
+        
         logger.info(f"Starting Sheet to BigQuery transfer for config: {name}")
         
         # Get data from Google Sheet
@@ -303,23 +356,46 @@ def main(config_id=None, name=None, google_sheet_url=None, google_sheet_tab_name
         table = client.get_table(table_ref)
         logger.info(f"Successfully loaded {table.num_rows} rows to BigQuery table")
         
-        return {
+        result = {
             'status': 'success',
             'rows_loaded': table.num_rows,
             'table_id': f"{google_cloud_project_id}.{bigquery_dataset_id}.{bigquery_table_id}"
         }
         
+        # Send success notification for job mode
+        if job_mode:
+            send_slack_notification(
+                f"✅ Sheet to BigQuery Job: Successfully processed '{name}' - {table.num_rows} rows loaded"
+            )
+        
+        return result
+        
     except Exception as e:
         logger.error(f"Error in Sheet to BigQuery transfer: {e}")
+        
+        # Send error notification for job mode
+        if job_mode:
+            send_slack_notification(
+                f"🔴 Sheet to BigQuery Job: Failed to process '{name or 'Unknown'}' - {e}"
+            )
+        
+        # Exit with error code in job mode
+        if job_mode:
+            sys.exit(1)
+        
         raise
 
 if __name__ == "__main__":
-    # Test locally
-    main(
-        name="test_config",
-        google_sheet_url="https://docs.google.com/spreadsheets/d/1example",
-        google_cloud_project_id="hkd-reporting",  # Use correct project for BigQuery
-        bigquery_dataset_id="test_dataset",
-        bigquery_table_id="test_table",
-        schema_handling="auto_detect"
-    ) 
+    # Job mode - read configuration from environment variables
+    try:
+        logger.info("Starting Sheet to BigQuery job...")
+        result = main()
+        if result:
+            logger.info("Job completed successfully")
+            sys.exit(0)
+        else:
+            logger.error("Job failed")
+            sys.exit(1)
+    except Exception as e:
+        logger.error(f"Job execution failed: {e}")
+        sys.exit(1) 

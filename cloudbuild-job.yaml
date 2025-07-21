@@ -1,0 +1,42 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # Step 1: Build the Docker image for the job
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build', '-t',
+      'us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/sheettobigquery-job:latest',
+      '-f', 'Dockerfile.job',
+      '.'
+    ]
+
+  # Step 2: Push the image to Google Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/sheettobigquery-job:latest']
+
+  # Step 3: Deploy as Cloud Run Job
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        # Delete existing job if it exists (ignore errors)
+        gcloud run jobs delete sheettobigquery-job \
+          --region=us-central1 \
+          --quiet || true
+        
+        # Create new Cloud Run Job
+        gcloud run jobs create sheettobigquery-job \
+          --image=us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/sheettobigquery-job:latest \
+          --region=us-central1 \
+          --memory=2Gi \
+          --cpu=1 \
+          --task-timeout=1800 \
+          --max-retries=3 \
+          --parallelism=0 \
+          --task-count=1 \
+          --set-secrets=google_cloud_hkdreporting=google_cloud_hkdreporting:latest,slack_accessToken=slack_accessToken:latest
+
+images:
+  - 'us-central1-docker.pkg.dev/hkd-reporting/github-service-sheettobigquery/sheettobigquery-job:latest' 

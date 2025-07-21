@@ -1,0 +1,18 @@
+FROM python:3.9-slim
+
+# Set the working directory
+WORKDIR /app
+
+# Copy application files
+COPY main.py requirements-job.txt ./
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements-job.txt
+
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Command to run the job
+CMD ["python", "main.py"] 
